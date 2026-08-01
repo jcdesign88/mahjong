@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TABLE — Online Team Mahjong</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,600;9..40,700&family=Noto+Serif+TC:wght@500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- LOBBY -->
+    <section id="lobby" class="screen">
+      <div class="lobby-bg" aria-hidden="true"></div>
+      <div class="lobby-inner">
+        <p class="brand">TABLE</p>
+        <h1 class="lobby-title">Team Mahjong</h1>
+        <p class="lobby-sub">Four players. Simple rules — complete hand wins. One shared room code.</p>
+
+        <form id="lobby-form" class="lobby-form">
+          <label>
+            Your name
+            <input id="name-input" type="text" maxlength="16" placeholder="Player name" autocomplete="nickname" />
+          </label>
+          <div class="lobby-actions">
+            <button type="button" id="btn-create" class="btn primary">Create room</button>
+            <div class="join-row">
+              <input id="code-input" type="text" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" />
+              <button type="button" id="btn-join" class="btn">Join</button>
+            </div>
+          </div>
+        </form>
+        <p id="lobby-error" class="error" hidden></p>
+        <div class="voice-row">
+          <span class="voice-label">Voice</span>
+          <button type="button" id="btn-voice-lobby" class="btn voice-btn" title="Switch voice language">普通话</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ROOM / GAME -->
+    <section id="table-screen" class="screen" hidden>
+      <header class="topbar">
+        <div class="topbar-brand">TABLE</div>
+        <div class="room-chip">
+          Room <strong id="room-code">·····</strong>
+          <button type="button" id="copy-link" class="linkish" title="Copy invite link">Copy link</button>
+        </div>
+        <div class="scoreboard" id="scoreboard"></div>
+        <button type="button" id="btn-voice" class="linkish mute-btn" title="Switch 普通话 / 粤语">普通话</button>
+        <button type="button" id="btn-mute" class="linkish mute-btn" title="Toggle sound">Sound on</button>
+      </header>
+
+      <div id="waiting" class="waiting" hidden>
+        <h2>Waiting for the table</h2>
+        <p class="waiting-sub">Each player scores alone · 4 melds + pair wins · 平胡 OK</p>
+        <div id="seat-list" class="seat-list"></div>
+        <div class="waiting-actions">
+          <button type="button" id="btn-ready" class="btn primary">Ready</button>
+          <button type="button" id="btn-bots" class="btn">Fill empty seats with bots</button>
+          <button type="button" id="btn-start" class="btn accent" hidden>Start match</button>
+        </div>
+      </div>
+
+      <div id="table" class="table" hidden>
+        <div class="felt">
+          <div id="opp-far" class="seat-panel far"></div>
+          <div class="mid-row">
+            <div id="opp-left" class="seat-panel side left"></div>
+            <div class="center">
+              <div class="center-meta">
+                <span id="round-label">Round 1</span>
+                <span id="wall-count">Wall · 0</span>
+                <span id="turn-label">—</span>
+              </div>
+              <div id="last-discard" class="last-discard"></div>
+              <div id="action-bar" class="action-bar" hidden></div>
+            </div>
+            <div id="opp-right" class="seat-panel side right"></div>
+          </div>
+          <div id="me" class="seat-panel me"></div>
+        </div>
+        <aside id="log" class="log" aria-label="Game log"></aside>
+      </div>
+
+      <div id="claim-overlay" class="claim-overlay" hidden>
+        <div class="claim-panel">
+          <div class="claim-head">
+            <span id="claim-title">可以叫牌</span>
+            <span id="claim-timer" class="claim-timer"></span>
+          </div>
+          <div id="claim-tile" class="claim-tile"></div>
+          <div id="claim-bar" class="claim-bar"></div>
+        </div>
+      </div>
+
+      <div id="overlay" class="overlay" hidden>
+        <div class="overlay-card">
+          <h2 id="overlay-title"></h2>
+          <p id="overlay-body"></p>
+          <div id="overlay-actions" class="waiting-actions"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="audio.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>

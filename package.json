@@ -1,0 +1,17 @@
+{
+  "name": "team-mahjong",
+  "version": "1.0.0",
+  "description": "Online 2v2 team mahjong — create a room and play with friends",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
