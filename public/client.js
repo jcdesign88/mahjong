@@ -334,7 +334,10 @@ function joinRoom(opts = {}) {
   );
 }
 
+let skipAutoRejoin = false;
+
 function tryAutoRejoin() {
+  if (skipAutoRejoin) return false;
   const sess = loadSession();
   const params = new URLSearchParams(window.location.search);
   const room = (params.get("room") || sess?.code || "").toUpperCase();
@@ -342,6 +345,46 @@ function tryAutoRejoin() {
   if ($("name-input") && sess.name) $("name-input").value = sess.name;
   joinRoom({ roomCode: room, name: sess.name, rejoinToken: sess.token });
   return true;
+}
+
+function returnToLobby() {
+  skipAutoRejoin = true;
+  clearSession();
+  awaitingHost = false;
+  myReady = false;
+  state = null;
+  prevState = null;
+  selectedTile = null;
+  lobby.hidden = false;
+  tableScreen.hidden = true;
+  waiting.hidden = true;
+  table.hidden = true;
+  overlay.hidden = true;
+  const claim = $("claim-overlay");
+  if (claim) claim.hidden = true;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("room");
+  history.replaceState(null, "", url.pathname + url.search + url.hash);
+  showError("");
+}
+
+function leaveRoom() {
+  const isHost = !!(state && state.isHost);
+  const msg = isHost
+    ? "离开房间？若你是房主，房主会转移给其他人"
+    : "离开房间，返回主页？";
+  if (!confirm(msg)) return;
+  // Clear local session first so reconnect / tryAutoRejoin cannot pull us back
+  skipAutoRejoin = true;
+  clearSession();
+  const url = new URL(window.location.href);
+  url.searchParams.delete("room");
+  history.replaceState(null, "", url.pathname + url.search + url.hash);
+  socket.emit("leaveRoom", {}, () => {
+    returnToLobby();
+  });
+  // Show lobby immediately even if callback is slow
+  returnToLobby();
 }
 
 $("btn-create").addEventListener("click", createRoom);
@@ -353,6 +396,7 @@ $("lobby-form").addEventListener("submit", (e) => {
 });
 
 function enterRoom(code) {
+  skipAutoRejoin = false;
   lobby.hidden = true;
   tableScreen.hidden = false;
   $("room-code").textContent = code;
@@ -371,9 +415,63 @@ $("copy-link").addEventListener("click", async () => {
   }
 });
 
+function syncLobbyNameField(name) {
+  const lobby = $("name-input");
+  if (lobby && name) lobby.value = name;
+}
+
+function emitSetName(raw, cb) {
+  const name = String(raw || "").trim().slice(0, 16);
+  if (!name) {
+    cb?.({ ok: false, error: "Name required" });
+    return;
+  }
+  socket.emit("setName", { name }, (res) => {
+    if (res?.ok) {
+      syncLobbyNameField(res.name || name);
+      if (state?.rejoinToken && state?.roomCode) {
+        saveSession(state.roomCode, state.rejoinToken, res.name || name);
+      }
+    } else if (res?.error) {
+      showToast(res.error);
+    }
+    cb?.(res);
+  });
+}
+
+function flushWaitingName(cb) {
+  const input = $("waiting-name-input");
+  if (!input || input.disabled || input.hidden) {
+    cb?.({ ok: true, skipped: true });
+    return;
+  }
+  const me = state?.mySeat >= 0 ? state.seats[state.mySeat] : null;
+  const next = input.value.trim();
+  if (!me || me.ready || !next || next === me.name) {
+    cb?.({ ok: true, skipped: true });
+    return;
+  }
+  emitSetName(next, cb);
+}
+
+$("waiting-name-input")?.addEventListener("change", () => flushWaitingName());
+$("waiting-name-input")?.addEventListener("blur", () => flushWaitingName());
+$("waiting-name-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    $("waiting-name-input").blur();
+  }
+});
+
 $("btn-ready").addEventListener("click", () => {
-  myReady = !myReady;
-  socket.emit("ready", { ready: myReady });
+  const nextReady = !myReady;
+  const go = () => {
+    myReady = nextReady;
+    socket.emit("ready", { ready: myReady });
+  };
+  // Persist any in-progress rename before locking Ready
+  if (nextReady) flushWaitingName(() => go());
+  else go();
 });
 
 $("btn-bots").addEventListener("click", () => socket.emit("fillBots", {}));
@@ -389,6 +487,8 @@ function emitStopGame() {
 
 $("btn-stop-game")?.addEventListener("click", emitStopGame);
 $("btn-stop-lobby")?.addEventListener("click", emitStopGame);
+$("btn-leave")?.addEventListener("click", leaveRoom);
+$("btn-leave-top")?.addEventListener("click", leaveRoom);
 
 function renderPendingList(container, pending) {
   if (!container) return;
@@ -489,18 +589,13 @@ socket.on("joinApproved", (payload) => {
 
 socket.on("joinDenied", (payload) => {
   awaitingHost = false;
-  clearSession();
-  lobby.hidden = false;
-  tableScreen.hidden = true;
+  returnToLobby();
   showError(payload?.reason || "加入被拒绝");
 });
 
 socket.on("kicked", (payload) => {
   awaitingHost = false;
-  clearSession();
-  state = null;
-  lobby.hidden = false;
-  tableScreen.hidden = true;
+  returnToLobby();
   showError(payload?.reason || "你已被房主请出房间");
 });
 
@@ -578,9 +673,12 @@ $("chat-form")?.addEventListener("submit", (e) => {
 function bindPtt() {
   const btn = $("btn-ptt");
   if (!btn || typeof VoiceChat === "undefined") return;
+  let pttActive = false;
 
   const start = async (ev) => {
     ev.preventDefault();
+    if (pttActive) return;
+    pttActive = true;
     try {
       btn.setPointerCapture?.(ev.pointerId);
     } catch (_) {
@@ -590,43 +688,39 @@ function bindPtt() {
       if (typeof AudioFX !== "undefined") AudioFX.prime();
       VoiceChat.setSocketId(socket.id);
       await VoiceChat.ensureMic();
-      // Re-sync peers after mic is ready so tracks are attached
-      if (state?.voicePeers?.length) {
-        await VoiceChat.syncPeers(state.voicePeers.map((p) => p.id));
-      }
+      // Re-sync peers after mic is ready so tracks attach via replaceTrack
+      await VoiceChat.syncPeers((state?.voicePeers || []).map((p) => p.id));
       VoiceChat.setTalking(true);
-      if (VoiceChat.peerCount() === 0) {
-        showToast("已开麦（真人声音）。房间里需要另一位真人才能听到你");
-      }
+      VoiceChat.resumeRemoteAudio?.();
+      const tip = VoiceChat.statusMessage?.();
+      if (tip) showToast(tip);
     } catch (err) {
       console.warn(err);
-      showToast("无法打开麦克风 — 请用 HTTPS 链接并允许麦克风权限");
+      pttActive = false;
+      showToast(VoiceChat.micErrorMessage?.(err) || "无法打开麦克风 — 请用 HTTPS 并允许麦克风权限");
       VoiceChat.setTalking(false);
     }
   };
   const end = (ev) => {
     ev.preventDefault();
+    if (!pttActive && !VoiceChat.isTalking()) return;
+    pttActive = false;
     VoiceChat.setTalking(false);
   };
 
   btn.addEventListener("pointerdown", start);
   btn.addEventListener("pointerup", end);
   btn.addEventListener("pointercancel", end);
-  // iOS Safari sometimes drops pointerup — also bind touch
-  btn.addEventListener(
-    "touchstart",
-    (ev) => {
-      start(ev);
-    },
-    { passive: false }
-  );
-  btn.addEventListener(
-    "touchend",
-    (ev) => {
-      end(ev);
-    },
-    { passive: false }
-  );
+  btn.addEventListener("pointerleave", (ev) => {
+    // Release if pointer drifts off while captured
+    if (pttActive && btn.hasPointerCapture?.(ev.pointerId)) end(ev);
+  });
+  // Older iOS: touch events when PointerEvent is missing
+  if (!window.PointerEvent) {
+    btn.addEventListener("touchstart", start, { passive: false });
+    btn.addEventListener("touchend", end, { passive: false });
+    btn.addEventListener("touchcancel", end, { passive: false });
+  }
 }
 bindPtt();
 
@@ -651,7 +745,7 @@ syncMuteBtn();
 syncVoiceBtns();
 
 // iPhone: audio only unlocks inside a real tap — prime on every main button
-["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots", "btn-mute", "btn-voice", "btn-voice-lobby", "btn-pause", "btn-resume", "btn-stop-game", "btn-stop-lobby"].forEach(
+["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots", "btn-mute", "btn-voice", "btn-voice-lobby", "btn-pause", "btn-resume", "btn-stop-game", "btn-stop-lobby", "btn-leave", "btn-leave-top"].forEach(
   (id) => {
     $(id)?.addEventListener("click", () => AudioFX.prime(), { once: false });
   }
@@ -767,6 +861,8 @@ function renderAwaitingHost() {
   if (list && awaitingHost) list.innerHTML = "";
   const pp = $("pending-panel");
   if (pp) pp.hidden = true;
+  const nameWrap = $("waiting-name-wrap");
+  if (nameWrap) nameWrap.hidden = true;
 }
 
 function renderWaiting() {
@@ -834,6 +930,17 @@ function renderWaiting() {
   $("btn-ready").hidden = !me;
   $("btn-ready").textContent = myReady ? "Unready" : "Ready";
   $("btn-ready").classList.toggle("primary", !myReady);
+
+  const nameWrap = $("waiting-name-wrap");
+  const nameInput = $("waiting-name-input");
+  if (nameWrap && nameInput) {
+    const seated = !!me;
+    nameWrap.hidden = !seated;
+    nameInput.disabled = !seated || myReady;
+    if (seated && document.activeElement !== nameInput) {
+      nameInput.value = me.name || "";
+    }
+  }
 
   $("btn-bots").hidden = !state.isHost;
   const stopLobby = $("btn-stop-lobby");

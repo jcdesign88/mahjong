@@ -158,6 +158,15 @@ input:focus {
   gap: 8px;
 }
 
+.join-row .btn.primary {
+  flex: 1;
+}
+
+#btn-create {
+  opacity: 0.85;
+  font-weight: 600;
+}
+
 .btn {
   font: inherit;
   font-weight: 700;
@@ -352,6 +361,23 @@ input:focus {
 .seat-card .meta { font-size: 0.8rem; color: var(--muted); }
 .seat-card { box-shadow: inset 3px 0 0 rgba(212, 162, 76, 0.45); }
 .seat-card.empty .player-name { color: rgba(243, 235, 224, 0.35); font-weight: 500; }
+
+.waiting-name {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(280px, 100%);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: left;
+}
+
+.waiting-name input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 .waiting-actions {
   display: flex;

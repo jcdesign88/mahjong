@@ -199,6 +199,15 @@ io.on("connection", (socket) => {
     broadcast(roomCode);
   });
 
+  socket.on("setName", ({ name }, cb) => {
+    const roomCode = roomOf(socket);
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false, error: "No room" });
+    const result = game.setName(socket.id, name);
+    cb?.(result);
+    if (result.ok) broadcast(roomCode);
+  });
+
   socket.on("fillBots", (_data, cb) => {
     const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
@@ -319,9 +328,31 @@ io.on("connection", (socket) => {
     const roomCode = roomOf(socket);
     if (!roomCode || !to || !data) return;
     const target = io.sockets.sockets.get(to);
-    if (target) {
+    // Only relay within the same room (stale socket ids after rejoin are dropped)
+    if (target && roomOf(target) === roomCode) {
       target.emit("voice-signal", { from: socket.id, data });
     }
+  });
+
+  socket.on("leaveRoom", (_payload, cb) => {
+    const roomCode = roomOf(socket);
+    if (!roomCode) return cb?.({ ok: true });
+    const game = rooms.get(roomCode);
+    if (!game) {
+      setRoom(socket, null);
+      return cb?.({ ok: true });
+    }
+    game.leave(socket.id, { intentional: true });
+    socket.leave(roomCode);
+    setRoom(socket, null);
+    if (game.humanCount() === 0 && game.phase === "lobby") {
+      scheduleEmptyCleanup(roomCode, game);
+      broadcast(roomCode);
+    } else {
+      broadcast(roomCode);
+      game.maybeBotAct();
+    }
+    cb?.({ ok: true });
   });
 
   socket.on("disconnect", () => {

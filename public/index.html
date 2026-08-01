@@ -17,7 +17,7 @@
       <div class="lobby-inner">
         <p class="brand">TABLE</p>
         <h1 class="lobby-title">Team Mahjong</h1>
-        <p class="lobby-sub">Four players. Simple rules — complete hand wins. One shared room code.</p>
+        <p class="lobby-sub">Enter a room code to join friends — or create a new table if you are hosting.</p>
 
         <form id="lobby-form" class="lobby-form">
           <label>
@@ -25,11 +25,11 @@
             <input id="name-input" type="text" maxlength="16" placeholder="Player name" autocomplete="nickname" />
           </label>
           <div class="lobby-actions">
-            <button type="button" id="btn-create" class="btn primary">Create room</button>
             <div class="join-row">
               <input id="code-input" type="text" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" />
-              <button type="button" id="btn-join" class="btn">Join</button>
+              <button type="button" id="btn-join" class="btn primary">Join</button>
             </div>
+            <button type="button" id="btn-create" class="btn">Create room</button>
           </div>
         </form>
         <p id="lobby-error" class="error" hidden></p>
@@ -54,6 +54,7 @@
         <button type="button" id="btn-pause" class="linkish mute-btn" title="托管：让机器人代打" hidden>托管</button>
         <button type="button" id="btn-resume" class="btn accent resume-btn" title="取消托管，自己继续打" hidden>取消托管</button>
         <button type="button" id="btn-stop-game" class="linkish mute-btn host-only-btn" title="结束对局，回到大厅" hidden>结束对局</button>
+        <button type="button" id="btn-leave-top" class="linkish mute-btn" title="离开房间，返回主页">离开房间</button>
       </header>
       <div id="host-pending-live" class="host-pending-live" hidden></div>
       <div id="afk-banner" class="afk-banner" hidden>
@@ -69,11 +70,16 @@
           <p class="waiting-sub">请不要关闭页面。房主点「允许」后你会自动入座（对局中会接手空位/机器人的牌）。</p>
         </div>
         <div id="seat-list" class="seat-list"></div>
+        <label id="waiting-name-wrap" class="waiting-name" hidden>
+          Your name
+          <input id="waiting-name-input" type="text" maxlength="16" placeholder="Player name" autocomplete="nickname" />
+        </label>
         <div class="waiting-actions">
           <button type="button" id="btn-ready" class="btn primary">Ready</button>
           <button type="button" id="btn-bots" class="btn" hidden>补机器人</button>
           <button type="button" id="btn-start" class="btn accent" hidden>Start match</button>
           <button type="button" id="btn-stop-lobby" class="btn" hidden>结束对局 / 重置</button>
+          <button type="button" id="btn-leave" class="btn">离开房间</button>
         </div>
       </div>
 
