@@ -181,14 +181,7 @@ const VoiceChat = (() => {
     const btn = document.getElementById("btn-ptt");
     if (btn) {
       btn.classList.toggle("live", talking);
-      if (talking) {
-        const n = peerCount();
-        if (n === 0) btn.textContent = "已开麦（无听众）";
-        else if (connectedCount() === 0) btn.textContent = "连接中…";
-        else btn.textContent = "说话中…";
-      } else {
-        btn.textContent = "按住说话";
-      }
+      btn.textContent = talking ? "开始说话" : "按住说话";
     }
   }
 

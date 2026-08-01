@@ -16,9 +16,7 @@ const EMPTY_LOBBY_MS = 3 * 60 * 1000;
 app.use(express.static(path.join(__dirname, "public")));
 
 function makeCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 5; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  const code = String(Math.floor(Math.random() * 90000) + 10000);
   if (rooms.has(code)) return makeCode();
   return code;
 }

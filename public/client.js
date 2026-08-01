@@ -708,6 +708,12 @@ function bindPtt() {
     VoiceChat.setTalking(false);
   };
 
+  const blockSelect = (ev) => ev.preventDefault();
+  btn.addEventListener("selectstart", blockSelect);
+  btn.addEventListener("contextmenu", blockSelect);
+  btn.addEventListener("dragstart", blockSelect);
+  btn.addEventListener("mousedown", blockSelect);
+
   btn.addEventListener("pointerdown", start);
   btn.addEventListener("pointerup", end);
   btn.addEventListener("pointercancel", end);
@@ -715,6 +721,10 @@ function bindPtt() {
     // Release if pointer drifts off while captured
     if (pttActive && btn.hasPointerCapture?.(ev.pointerId)) end(ev);
   });
+  // Long-press text selection on iOS — touchstart preventDefault when PointerEvent exists too
+  btn.addEventListener("touchstart", (ev) => {
+    if (!pttActive) ev.preventDefault();
+  }, { passive: false });
   // Older iOS: touch events when PointerEvent is missing
   if (!window.PointerEvent) {
     btn.addEventListener("touchstart", start, { passive: false });
