@@ -177,6 +177,34 @@ const AudioFX = (() => {
     }
   }
 
+  /** Quick-chat lines in 东北口吻 — zh-CN voice, punchier rate (no real 东北 TTS). */
+  function speakDongbei(text) {
+    if (muted || !text || !window.speechSynthesis) return;
+    prime();
+    try {
+      speechSynthesis.cancel();
+      const spoken = toSimplified(text);
+      const u = new SpeechSynthesisUtterance(spoken);
+      const voices = speechSynthesis.getVoices?.() || [];
+      const voice =
+        voices.find((v) => /zh[-_]?CN/i.test(v.lang)) ||
+        voices.find((v) => /chinese\s*\(?china\)?|普通话|大陆|xiaoxiao|yaoyao/i.test(v.name)) ||
+        voices.find((v) => /^zh/i.test(v.lang));
+      if (voice) {
+        u.voice = voice;
+        u.lang = voice.lang || "zh-CN";
+      } else {
+        u.lang = "zh-CN";
+      }
+      u.rate = 1.12;
+      u.pitch = 1.08;
+      u.volume = 1;
+      speechSynthesis.speak(u);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
   function tone(freq, dur, type = "triangle", gain = 0.08, when = 0) {
     const ac = ensureCtx();
     if (!ac || muted) return;
@@ -357,6 +385,7 @@ const AudioFX = (() => {
     isMuted,
     setMuted,
     speak,
+    speakDongbei,
     discardClack,
     softClick,
     getDialect,

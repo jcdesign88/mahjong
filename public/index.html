@@ -51,7 +51,12 @@
         <div class="scoreboard" id="scoreboard"></div>
         <button type="button" id="btn-voice" class="linkish mute-btn" title="Switch 普通话 / 粤语">普通话</button>
         <button type="button" id="btn-mute" class="linkish mute-btn" title="Toggle sound">Sound on</button>
+        <button type="button" id="btn-pause" class="linkish mute-btn" title="托管：让机器人代打" hidden>托管</button>
+        <button type="button" id="btn-resume" class="btn accent resume-btn" title="取消托管，自己继续打" hidden>取消托管</button>
       </header>
+      <div id="afk-banner" class="afk-banner" hidden>
+        机器人代打中 — 点 <strong>取消托管</strong> 继续自己打
+      </div>
 
       <div id="waiting" class="waiting" hidden>
         <h2>Waiting for the table</h2>
@@ -81,9 +86,14 @@
             <div id="opp-right" class="seat-panel side right"></div>
           </div>
           <div id="me" class="seat-panel me"></div>
+          <div id="quick-chat" class="quick-chat" hidden>
+            <span class="quick-chat-label">快捷</span>
+            <div id="quick-chat-bar" class="quick-chat-bar"></div>
+          </div>
         </div>
         <aside id="log" class="log" aria-label="Game log"></aside>
       </div>
+      <div id="chat-bubble" class="chat-bubble" hidden></div>
 
       <div id="claim-overlay" class="claim-overlay" hidden>
         <div class="claim-panel">

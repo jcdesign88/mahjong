@@ -487,6 +487,29 @@ input:focus {
   box-shadow: 1px 8px 0 #c4b8a4, 0 12px 18px rgba(0, 0, 0, 0.35);
 }
 
+/* Just-drawn tile — bold gold until this turn ends */
+.tile.drawn {
+  margin-left: 12px;
+  transform: translateY(-8px);
+  border: 2px solid #e8b84a;
+  background: linear-gradient(165deg, #ffe9a8 0%, #f5d06a 40%, #e8b84a 100%);
+  box-shadow:
+    0 0 0 3px rgba(232, 184, 74, 0.85),
+    0 0 14px rgba(232, 184, 74, 0.65),
+    1px 5px 0 #b8862d,
+    0 8px 16px rgba(0, 0, 0, 0.35);
+}
+
+.tile.drawn.selected,
+.tile.drawn.selectable:hover {
+  transform: translateY(-14px);
+  box-shadow:
+    0 0 0 3px #f0c85c,
+    0 0 18px rgba(240, 200, 92, 0.8),
+    1px 10px 0 #b8862d,
+    0 14px 20px rgba(0, 0, 0, 0.4);
+}
+
 .tile.small { --w: 26px; }
 .tile.tiny { --w: 22px; }
 
@@ -798,17 +821,19 @@ input:focus {
   .seat-label { font-size: 0.65rem; }
   .seat-label .who { font-size: 0.75rem; }
 
-  .tile { --w: 34px; }
-  .tile.small { --w: 20px; }
-  .tile.tiny { --w: 16px; }
+  /* Bigger hand tiles — wrap onto ~2 rows instead of tiny single row */
+  .tile { --w: 42px; }
+  .tile.small { --w: 22px; }
+  .tile.tiny { --w: 18px; }
 
   .seat-panel.me .tiles {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow-x: visible;
     max-width: 100%;
-    -webkit-overflow-scrolling: touch;
-    padding: 10px 4px 4px;
-    justify-content: flex-start;
+    padding: 8px 2px 4px;
+    justify-content: center;
+    gap: 3px;
+    row-gap: 6px;
   }
 
   .discards { max-width: 100%; }
@@ -833,7 +858,106 @@ input:focus {
 }
 
 @media (max-width: 420px) {
-  .tile { --w: 30px; }
-  .tile.small { --w: 18px; }
-  .tile.tiny { --w: 14px; }
+  .tile { --w: 40px; }
+  .tile.small { --w: 20px; }
+  .tile.tiny { --w: 16px; }
+}
+
+/* Quick voice phrases */
+.quick-chat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 8px;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.quick-chat-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: rgba(243, 235, 224, 0.5);
+  flex-shrink: 0;
+}
+
+.quick-chat-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.quick-chat-btn {
+  border: 1px solid rgba(243, 235, 224, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--cream);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quick-chat-btn:active {
+  background: rgba(212, 162, 76, 0.35);
+  border-color: rgba(212, 162, 76, 0.55);
+}
+
+.chat-bubble {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  z-index: 40;
+  background: rgba(22, 18, 14, 0.92);
+  border: 1px solid rgba(212, 162, 76, 0.45);
+  color: var(--cream);
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 1rem;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.chat-bubble strong {
+  color: var(--gold);
+  margin-right: 6px;
+}
+
+.chat-bubble.pop {
+  animation: chatPop 0.35s ease-out;
+}
+
+@keyframes chatPop {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+@media (max-width: 820px) {
+  .quick-chat-btn {
+    font-size: 0.72rem;
+    padding: 7px 9px;
+    min-height: 36px;
+  }
+}
+
+/* AFK / pause banner */
+.afk-banner {
+  flex-shrink: 0;
+  text-align: center;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  background: rgba(212, 162, 76, 0.18);
+  border-bottom: 1px solid rgba(212, 162, 76, 0.35);
+  color: var(--cream);
+}
+
+.afk-banner strong { color: var(--gold); }
+
+.resume-btn {
+  padding: 6px 12px !important;
+  font-size: 0.85rem !important;
 }

@@ -231,9 +231,19 @@ function tileClass(id) {
 function makeTile(id, opts = {}) {
   const el = document.createElement("button");
   el.type = "button";
-  el.className = `tile ${tileClass(id)} ${opts.size || ""} ${opts.back ? "back" : ""} ${opts.selectable ? "selectable" : ""} ${opts.selected ? "selected" : ""}`;
+  el.className = [
+    "tile",
+    tileClass(id),
+    opts.size || "",
+    opts.back ? "back" : "",
+    opts.selectable ? "selectable" : "",
+    opts.selected ? "selected" : "",
+    opts.drawn ? "drawn" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   if (!opts.back) el.innerHTML = renderTileArt(id);
-  el.title = tileLabel(id);
+  el.title = opts.drawn ? `${tileLabel(id)} (just drawn)` : tileLabel(id);
   if (opts.onClick) el.addEventListener("click", opts.onClick);
   if (opts.disabled) el.disabled = true;
   return el;
@@ -319,6 +329,15 @@ socket.on("state", (s) => {
   render();
 });
 
+socket.on("quickChat", (chat) => {
+  if (!chat) return;
+  showChatBubble(chat);
+  if (typeof AudioFX !== "undefined") {
+    AudioFX.prime();
+    AudioFX.speakDongbei(chat.text);
+  }
+});
+
 function syncMuteBtn() {
   const btn = $("btn-mute");
   if (!btn || typeof AudioFX === "undefined") return;
@@ -348,11 +367,43 @@ $("btn-mute")?.addEventListener("click", () => {
 });
 $("btn-voice")?.addEventListener("click", cycleVoice);
 $("btn-voice-lobby")?.addEventListener("click", cycleVoice);
+
+function syncPauseUI() {
+  const pauseBtn = $("btn-pause");
+  const resumeBtn = $("btn-resume");
+  const banner = $("afk-banner");
+  const inGame =
+    state &&
+    state.mySeat >= 0 &&
+    (state.phase === "playing" || state.phase === "claim");
+  const paused = !!(state && state.mePaused);
+  if (pauseBtn) pauseBtn.hidden = !inGame || paused;
+  if (resumeBtn) resumeBtn.hidden = !inGame || !paused;
+  if (banner) banner.hidden = !paused;
+}
+
+$("btn-pause")?.addEventListener("click", () => {
+  if (typeof AudioFX !== "undefined") AudioFX.prime();
+  socket.emit("pause", {}, (res) => {
+    if (res && res.ok === false && res.error) showToast(res.error);
+  });
+});
+
+$("btn-resume")?.addEventListener("click", () => {
+  if (typeof AudioFX !== "undefined") AudioFX.prime();
+  socket.emit("resume", {}, (res) => {
+    if (res && res.ok === false && res.error) showToast(res.error);
+  });
+});
+
+// Coming back to the tab while paused → offer control (auto-resume on tap of Resume only;
+// visibility alone doesn't steal mid-bot-move unexpectedly — user taps Resume)
+
 syncMuteBtn();
 syncVoiceBtns();
 
 // iPhone: audio only unlocks inside a real tap — prime on every main button
-["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots", "btn-mute", "btn-voice", "btn-voice-lobby"].forEach(
+["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots", "btn-mute", "btn-voice", "btn-voice-lobby", "btn-pause", "btn-resume"].forEach(
   (id) => {
     $(id)?.addEventListener("click", () => AudioFX.prime(), { once: false });
   }
@@ -362,11 +413,14 @@ function render() {
   if (!state) return;
   $("room-code").textContent = state.roomCode;
   renderScoreboard();
+  syncPauseUI();
 
   if (state.phase === "lobby") {
     waiting.hidden = false;
     table.hidden = true;
     overlay.hidden = true;
+    const banner = $("afk-banner");
+    if (banner) banner.hidden = true;
     renderWaiting();
     return;
   }
@@ -374,12 +428,67 @@ function render() {
   waiting.hidden = true;
   table.hidden = false;
   renderTable();
+  renderQuickChat();
 
   if (state.phase === "round_end" || state.phase === "match_end") {
     renderOverlay();
   } else {
     overlay.hidden = true;
   }
+}
+
+const DEFAULT_QUICK = [
+  { id: "hurry", text: "麻利点" },
+  { id: "deal", text: "快出牌啊" },
+  { id: "wait", text: "等会儿" },
+  { id: "brb", text: "马上回来" },
+  { id: "calm", text: "别催呗" },
+  { id: "sorry", text: "不好意思啊" },
+  { id: "thanks", text: "谢谢啊" },
+];
+
+function renderQuickChat() {
+  const wrap = $("quick-chat");
+  const bar = $("quick-chat-bar");
+  if (!wrap || !bar) return;
+  const show =
+    state &&
+    state.mySeat >= 0 &&
+    (state.phase === "playing" || state.phase === "claim" || state.phase === "round_end");
+  wrap.hidden = !show;
+  if (!show) return;
+
+  const phrases = state.quickPhrases?.length ? state.quickPhrases : DEFAULT_QUICK;
+  if (bar.dataset.built === phrases.map((p) => p.id).join(",")) return;
+  bar.dataset.built = phrases.map((p) => p.id).join(",");
+  bar.innerHTML = "";
+  for (const p of phrases) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "quick-chat-btn";
+    b.textContent = p.text;
+    b.addEventListener("click", () => {
+      if (typeof AudioFX !== "undefined") AudioFX.prime();
+      socket.emit("quickChat", { id: p.id }, (res) => {
+        if (res && res.ok === false && res.error) showToast(res.error);
+      });
+    });
+    bar.appendChild(b);
+  }
+}
+
+function showChatBubble(chat) {
+  const el = $("chat-bubble");
+  if (!el) return;
+  el.innerHTML = `<strong>${escapeHtml(chat.name)}</strong> ${escapeHtml(chat.text)}`;
+  el.hidden = false;
+  el.classList.remove("pop");
+  void el.offsetWidth;
+  el.classList.add("pop");
+  clearTimeout(showChatBubble._t);
+  showChatBubble._t = setTimeout(() => {
+    el.hidden = true;
+  }, 2800);
 }
 
 function renderScoreboard() {
@@ -463,13 +572,21 @@ function renderSeatPanel(el, seatIndex, opts = {}) {
       state.phase === "playing" &&
       seat.isTurn &&
       seat.seat === state.mySeat &&
+      !state.mePaused &&
+      !seat.isBot &&
       seat.hand.length % 3 === 2;
 
-    for (const t of seat.hand) {
+    seat.hand.forEach((t, i) => {
+      const isDrawn =
+        seat.seat === state.mySeat &&
+        state.lastDraw != null &&
+        state.lastDrawIndex === i &&
+        state.lastDraw === t;
       hand.appendChild(
         makeTile(t, {
           selectable: canDiscard,
           selected: selectedTile === t,
+          drawn: isDrawn,
           onClick: canDiscard
             ? () => {
                 if (selectedTile === t) {
@@ -485,7 +602,7 @@ function renderSeatPanel(el, seatIndex, opts = {}) {
             : null,
         })
       );
-    }
+    });
     el.appendChild(hand);
     if (canDiscard) {
       const hint = document.createElement("div");

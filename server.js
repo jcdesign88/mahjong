@@ -133,6 +133,34 @@ io.on("connection", (socket) => {
     broadcast(roomCode);
   });
 
+  socket.on("pause", (_data, cb) => {
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.pause(socket.id);
+    cb?.(result);
+    broadcast(roomCode);
+    game.maybeBotAct();
+  });
+
+  socket.on("resume", (_data, cb) => {
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.resume(socket.id);
+    cb?.(result);
+    broadcast(roomCode);
+  });
+
+  socket.on("quickChat", ({ id }, cb) => {
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.quickChat(socket.id, id);
+    cb?.(result);
+    if (result.ok && result.chat) {
+      io.to(roomCode).emit("quickChat", result.chat);
+      broadcast(roomCode);
+    }
+  });
+
   socket.on("disconnect", () => {
     if (!roomCode) return;
     const game = rooms.get(roomCode);
