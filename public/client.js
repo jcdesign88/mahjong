@@ -351,10 +351,12 @@ $("btn-voice-lobby")?.addEventListener("click", cycleVoice);
 syncMuteBtn();
 syncVoiceBtns();
 
-// Browsers require a user gesture before audio/speech
-["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots"].forEach((id) => {
-  $(id)?.addEventListener("click", () => AudioFX.prime(), { once: false });
-});
+// iPhone: audio only unlocks inside a real tap — prime on every main button
+["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots", "btn-mute", "btn-voice", "btn-voice-lobby"].forEach(
+  (id) => {
+    $(id)?.addEventListener("click", () => AudioFX.prime(), { once: false });
+  }
+);
 
 function render() {
   if (!state) return;

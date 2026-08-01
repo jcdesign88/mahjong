@@ -66,19 +66,63 @@ const AudioFX = (() => {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (AC) ctx = new AC();
     }
-    if (ctx?.state === "suspended") ctx.resume();
+    // iOS often starts suspended — resume on every prime attempt
+    if (ctx?.state === "suspended") {
+      try {
+        ctx.resume();
+      } catch (_) {
+        /* ignore */
+      }
+    }
     return ctx;
   }
 
+  /**
+   * Unlock WebAudio + speechSynthesis. Must run inside a user gesture on iPhone
+   * (tap/click); later socket-driven sounds then work.
+   */
   function prime() {
-    if (primed) return;
-    primed = true;
-    ensureCtx();
+    const ac = ensureCtx();
     try {
-      speechSynthesis.getVoices();
+      speechSynthesis.getVoices?.();
     } catch (_) {
       /* ignore */
     }
+    if (primed) return;
+    primed = true;
+
+    // Silent buffer — unlocks AudioContext on iOS Safari
+    try {
+      if (ac) {
+        const buf = ac.createBuffer(1, 1, ac.sampleRate || 22050);
+        const src = ac.createBufferSource();
+        src.buffer = buf;
+        src.connect(ac.destination);
+        src.start(0);
+      }
+    } catch (_) {
+      /* ignore */
+    }
+
+    // Near-silent utterance — unlocks speechSynthesis on iOS (must be in gesture)
+    try {
+      if (window.speechSynthesis) {
+        const u = new SpeechSynthesisUtterance("·");
+        u.volume = 0.01;
+        u.rate = 2;
+        u.lang = dialect === "cantonese" ? "zh-HK" : "zh-CN";
+        speechSynthesis.speak(u);
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  // Catch the first tap anywhere (iPhone often never hits a button before game audio)
+  if (typeof window !== "undefined") {
+    const unlock = () => prime();
+    window.addEventListener("touchstart", unlock, { once: true, passive: true });
+    window.addEventListener("pointerdown", unlock, { once: true });
   }
 
   function pickVoice() {
