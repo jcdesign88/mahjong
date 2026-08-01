@@ -161,6 +161,23 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("chat", ({ text, voice }, cb) => {
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.chat(socket.id, text, { voice });
+    cb?.(result);
+    if (result.ok && result.chat) {
+      io.to(roomCode).emit("quickChat", result.chat);
+      broadcast(roomCode);
+    }
+  });
+
+  // WebRTC voice signaling (peer-to-peer audio between humans)
+  socket.on("voice-signal", ({ to, data }) => {
+    if (!roomCode || !to || !data) return;
+    io.to(to).emit("voice-signal", { from: socket.id, data });
+  });
+
   socket.on("disconnect", () => {
     if (!roomCode) return;
     const game = rooms.get(roomCode);

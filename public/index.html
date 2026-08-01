@@ -95,6 +95,19 @@
       </div>
       <div id="chat-bubble" class="chat-bubble" hidden></div>
 
+      <div id="chat-dock" class="chat-dock" hidden>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div id="chat-quick" class="chat-quick"></div>
+        <form id="chat-form" class="chat-compose">
+          <button type="button" id="btn-ptt" class="btn-ptt" title="按住对讲（真人语音）">按住说话</button>
+          <input id="chat-input" type="text" maxlength="80" placeholder="说点什么…" autocomplete="off" />
+          <label class="chat-tts-label" title="发送后语音朗读">
+            <input type="checkbox" id="chat-tts" checked /> 朗读
+          </label>
+          <button type="submit" class="btn accent chat-send">发送</button>
+        </form>
+      </div>
+
       <div id="claim-overlay" class="claim-overlay" hidden>
         <div class="claim-panel">
           <div class="claim-head">
@@ -117,6 +130,7 @@
   </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="audio.js"></script>
+  <script src="voice.js"></script>
   <script src="client.js"></script>
 </body>
 </html>

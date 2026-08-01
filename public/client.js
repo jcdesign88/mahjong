@@ -332,10 +332,20 @@ socket.on("state", (s) => {
 socket.on("quickChat", (chat) => {
   if (!chat) return;
   showChatBubble(chat);
-  if (typeof AudioFX !== "undefined") {
+  appendChatMessage(chat);
+  const ttsOn = $("chat-tts")?.checked !== false;
+  if (chat.voice && ttsOn && typeof AudioFX !== "undefined") {
     AudioFX.prime();
     AudioFX.speakDongbei(chat.text);
   }
+});
+
+socket.on("connect", () => {
+  if (typeof VoiceChat !== "undefined") VoiceChat.setSocketId(socket.id);
+});
+
+socket.on("voice-signal", (payload) => {
+  if (typeof VoiceChat !== "undefined") VoiceChat.onSignal(payload);
 });
 
 function syncMuteBtn() {
@@ -372,15 +382,62 @@ function syncPauseUI() {
   const pauseBtn = $("btn-pause");
   const resumeBtn = $("btn-resume");
   const banner = $("afk-banner");
+  const dock = $("chat-dock");
   const inGame =
     state &&
     state.mySeat >= 0 &&
     (state.phase === "playing" || state.phase === "claim");
+  const inRoom = state && state.mySeat >= 0 && state.phase !== undefined;
   const paused = !!(state && state.mePaused);
   if (pauseBtn) pauseBtn.hidden = !inGame || paused;
   if (resumeBtn) resumeBtn.hidden = !inGame || !paused;
   if (banner) banner.hidden = !paused;
+  if (dock) dock.hidden = !inRoom;
 }
+
+function syncVoicePeers() {
+  if (typeof VoiceChat === "undefined" || !state?.voicePeers) return;
+  VoiceChat.setSocketId(socket.id);
+  VoiceChat.syncPeers(state.voicePeers.map((p) => p.id));
+}
+
+$("chat-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("chat-input");
+  const text = input?.value?.trim();
+  if (!text) return;
+  if (typeof AudioFX !== "undefined") AudioFX.prime();
+  const voice = !!$("chat-tts")?.checked;
+  socket.emit("chat", { text, voice }, (res) => {
+    if (res && res.ok === false && res.error) showToast(res.error);
+    else if (input) input.value = "";
+  });
+});
+
+// Push-to-talk (real mic)
+function bindPtt() {
+  const btn = $("btn-ptt");
+  if (!btn || typeof VoiceChat === "undefined") return;
+  const start = async (ev) => {
+    ev.preventDefault();
+    try {
+      if (typeof AudioFX !== "undefined") AudioFX.prime();
+      await VoiceChat.ensureMic();
+      VoiceChat.setTalking(true);
+    } catch (_) {
+      showToast("无法打开麦克风（需 HTTPS 并允许权限）");
+    }
+  };
+  const end = (ev) => {
+    ev.preventDefault();
+    VoiceChat.setTalking(false);
+  };
+  btn.addEventListener("pointerdown", start);
+  btn.addEventListener("pointerup", end);
+  btn.addEventListener("pointerleave", end);
+  btn.addEventListener("pointercancel", end);
+}
+bindPtt();
 
 $("btn-pause")?.addEventListener("click", () => {
   if (typeof AudioFX !== "undefined") AudioFX.prime();
@@ -422,6 +479,9 @@ function render() {
     const banner = $("afk-banner");
     if (banner) banner.hidden = true;
     renderWaiting();
+    renderChatMessages();
+    renderChatQuick();
+    syncVoicePeers();
     return;
   }
 
@@ -429,6 +489,9 @@ function render() {
   table.hidden = false;
   renderTable();
   renderQuickChat();
+  renderChatMessages();
+  renderChatQuick();
+  syncVoicePeers();
 
   if (state.phase === "round_end" || state.phase === "match_end") {
     renderOverlay();
@@ -489,6 +552,53 @@ function showChatBubble(chat) {
   showChatBubble._t = setTimeout(() => {
     el.hidden = true;
   }, 2800);
+}
+
+function appendChatMessage(chat) {
+  if (!state) return;
+  if (!state.chatMessages) state.chatMessages = [];
+  const last = state.chatMessages[state.chatMessages.length - 1];
+  if (last && last.t === chat.t && last.seat === chat.seat && last.text === chat.text) return;
+  state.chatMessages.push(chat);
+  if (state.chatMessages.length > 50) state.chatMessages.shift();
+  renderChatMessages();
+}
+
+function renderChatMessages() {
+  const el = $("chat-messages");
+  if (!el || !state) return;
+  const msgs = state.chatMessages || [];
+  el.innerHTML = msgs
+    .map((m) => {
+      const mine = m.seat === state.mySeat;
+      return `<div class="chat-line ${mine ? "mine" : ""}"><span class="chat-name">${escapeHtml(
+        m.name
+      )}</span><span class="chat-text">${escapeHtml(m.text)}</span></div>`;
+    })
+    .join("");
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderChatQuick() {
+  const bar = $("chat-quick");
+  if (!bar || !state) return;
+  const phrases = state.quickPhrases?.length ? state.quickPhrases : DEFAULT_QUICK;
+  if (bar.dataset.built === phrases.map((p) => p.id).join(",")) return;
+  bar.dataset.built = phrases.map((p) => p.id).join(",");
+  bar.innerHTML = "";
+  for (const p of phrases) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "quick-chat-btn";
+    b.textContent = p.text;
+    b.addEventListener("click", () => {
+      if (typeof AudioFX !== "undefined") AudioFX.prime();
+      socket.emit("quickChat", { id: p.id }, (res) => {
+        if (res && res.ok === false && res.error) showToast(res.error);
+      });
+    });
+    bar.appendChild(b);
+  }
 }
 
 function renderScoreboard() {
@@ -636,12 +746,14 @@ function renderTable() {
   $("round-label").textContent = `Round ${state.round}`;
   $("wall-count").textContent = `Wall · ${state.wallCount}`;
   const turnSeat = state.seats[state.turn];
-  $("turn-label").textContent =
-    state.phase === "claim"
-      ? "Claim window"
-      : turnSeat
-        ? `${turnSeat.name}'s turn`
-        : "—";
+  if (state.phase === "claim") {
+    $("turn-label").textContent = "有人可以叫牌…";
+  } else if (turnSeat) {
+    const thinking = turnSeat.isBot || turnSeat.paused ? "想一会儿" : "出牌中";
+    $("turn-label").textContent = `轮到 ${turnSeat.name} · ${thinking}`;
+  } else {
+    $("turn-label").textContent = "—";
+  }
 
   const ld = $("last-discard");
   ld.innerHTML = "";
