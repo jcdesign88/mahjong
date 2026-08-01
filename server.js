@@ -124,6 +124,7 @@ io.on("connection", (socket) => {
       const target = io.sockets.sockets.get(result.socketId);
       if (target) {
         setRoom(target, game.roomCode);
+        target.join(game.roomCode);
         target.emit("joinApproved", {
           roomCode: game.roomCode,
           seat: result.seat,
@@ -167,7 +168,26 @@ io.on("connection", (socket) => {
         }
       }
       broadcast(roomCode);
+      if (game.phase !== "lobby") game.maybeBotAct();
     }
+  });
+
+  socket.on("stopGame", (_data, cb) => {
+    const roomCode = roomOf(socket);
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.stopGame(socket.id);
+    cb?.(result);
+    if (result.ok) broadcast(roomCode);
+  });
+
+  socket.on("resetRoom", (_data, cb) => {
+    const roomCode = roomOf(socket);
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.resetByHost(socket.id);
+    cb?.(result);
+    if (result.ok) broadcast(roomCode);
   });
 
   socket.on("ready", ({ ready }, cb) => {

@@ -379,6 +379,77 @@ $("btn-ready").addEventListener("click", () => {
 $("btn-bots").addEventListener("click", () => socket.emit("fillBots", {}));
 $("btn-start").addEventListener("click", () => socket.emit("start", {}));
 
+function emitStopGame() {
+  if (!confirm("结束对局并回到大厅？座位上的人会保留，牌局状态清空。")) return;
+  if (typeof AudioFX !== "undefined") AudioFX.prime();
+  socket.emit("stopGame", {}, (res) => {
+    if (res && res.ok === false && res.error) showToast(res.error);
+  });
+}
+
+$("btn-stop-game")?.addEventListener("click", emitStopGame);
+$("btn-stop-lobby")?.addEventListener("click", emitStopGame);
+
+function renderPendingList(container, pending) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!pending?.length) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  const title = document.createElement("div");
+  title.className = "waiting-sub";
+  title.textContent = "加入申请（房主审批）";
+  container.appendChild(title);
+  for (const req of pending) {
+    const row = document.createElement("div");
+    row.className = "pending-card";
+    row.innerHTML = `<span class="pending-name">${escapeHtml(req.name)}</span>`;
+    const actions = document.createElement("div");
+    actions.className = "pending-actions";
+    const allow = document.createElement("button");
+    allow.type = "button";
+    allow.className = "btn accent tiny";
+    allow.textContent = "允许";
+    allow.addEventListener("click", () => {
+      AudioFX.prime?.();
+      socket.emit("approveJoin", { socketId: req.socketId }, (res) => {
+        if (res && res.ok === false && res.error) showToast(res.error);
+      });
+    });
+    const deny = document.createElement("button");
+    deny.type = "button";
+    deny.className = "btn tiny";
+    deny.textContent = "拒绝";
+    deny.addEventListener("click", () => {
+      socket.emit("denyJoin", { socketId: req.socketId });
+    });
+    actions.append(allow, deny);
+    row.appendChild(actions);
+    container.appendChild(row);
+  }
+}
+
+function syncHostControls() {
+  const stopTop = $("btn-stop-game");
+  const stopLobby = $("btn-stop-lobby");
+  const host = !!(state && state.isHost);
+  const inRoom = !!(state && state.mySeat >= 0);
+  if (stopTop) stopTop.hidden = !(host && inRoom);
+  if (stopLobby) stopLobby.hidden = !(host && state?.phase === "lobby");
+
+  const live = $("host-pending-live");
+  if (live) {
+    if (host && state?.phase !== "lobby" && (state.pendingJoins || []).length) {
+      renderPendingList(live, state.pendingJoins);
+    } else {
+      live.hidden = true;
+      live.innerHTML = "";
+    }
+  }
+}
+
 let prevState = null;
 
 socket.on("state", (s) => {
@@ -580,7 +651,7 @@ syncMuteBtn();
 syncVoiceBtns();
 
 // iPhone: audio only unlocks inside a real tap — prime on every main button
-["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots", "btn-mute", "btn-voice", "btn-voice-lobby", "btn-pause", "btn-resume"].forEach(
+["btn-create", "btn-join", "btn-ready", "btn-start", "btn-bots", "btn-mute", "btn-voice", "btn-voice-lobby", "btn-pause", "btn-resume", "btn-stop-game", "btn-stop-lobby"].forEach(
   (id) => {
     $(id)?.addEventListener("click", () => AudioFX.prime(), { once: false });
   }
@@ -591,6 +662,16 @@ function render() {
   $("room-code").textContent = state.roomCode;
   renderScoreboard();
   syncPauseUI();
+  syncHostControls();
+
+  // Mid-game joiner waiting for host approval
+  if (awaitingHost && state.mySeat < 0) {
+    waiting.hidden = false;
+    table.hidden = true;
+    overlay.hidden = true;
+    renderAwaitingHost();
+    return;
+  }
 
   if (state.phase === "lobby") {
     waiting.hidden = false;
@@ -705,41 +786,11 @@ function renderWaiting() {
 
   const pendingPanel = $("pending-panel");
   if (pendingPanel) {
-    pendingPanel.innerHTML = "";
-    const pending = state.pendingJoins || [];
-    if (state.isHost && pending.length) {
-      pendingPanel.hidden = false;
-      const title = document.createElement("div");
-      title.className = "waiting-sub";
-      title.textContent = "加入申请（房主审批）";
-      pendingPanel.appendChild(title);
-      for (const req of pending) {
-        const row = document.createElement("div");
-        row.className = "pending-card";
-        row.innerHTML = `<span class="pending-name">${escapeHtml(req.name)}</span>`;
-        const actions = document.createElement("div");
-        actions.className = "pending-actions";
-        const allow = document.createElement("button");
-        allow.type = "button";
-        allow.className = "btn accent tiny";
-        allow.textContent = "允许";
-        allow.addEventListener("click", () => {
-          AudioFX.prime?.();
-          socket.emit("approveJoin", { socketId: req.socketId });
-        });
-        const deny = document.createElement("button");
-        deny.type = "button";
-        deny.className = "btn tiny";
-        deny.textContent = "拒绝";
-        deny.addEventListener("click", () => {
-          socket.emit("denyJoin", { socketId: req.socketId });
-        });
-        actions.append(allow, deny);
-        row.appendChild(actions);
-        pendingPanel.appendChild(row);
-      }
+    if (state.isHost && (state.pendingJoins || []).length) {
+      renderPendingList(pendingPanel, state.pendingJoins);
     } else {
       pendingPanel.hidden = true;
+      pendingPanel.innerHTML = "";
     }
   }
 
@@ -785,6 +836,8 @@ function renderWaiting() {
   $("btn-ready").classList.toggle("primary", !myReady);
 
   $("btn-bots").hidden = !state.isHost;
+  const stopLobby = $("btn-stop-lobby");
+  if (stopLobby) stopLobby.hidden = !state.isHost;
 
   const allReady = state.seats.every((s) => (s.name || s.isBot) && (s.isBot || s.ready));
   const full = state.seats.every((s) => s.name || s.isBot);
@@ -806,7 +859,27 @@ function renderSeatPanel(el, seatIndex, opts = {}) {
   el.innerHTML = "";
   const label = document.createElement("div");
   label.className = `seat-label ${seat.isTurn ? "turn" : ""}`;
-  label.innerHTML = `<span class="who">${seat.name || "—"}</span> · ${seat.seatName} · ${seat.score} pts`;
+  label.innerHTML = `<span class="who">${escapeHtml(seat.name || "—")}</span> · ${seat.seatName} · ${seat.score} pts`;
+
+  // Host kick during game (bots / non-host humans)
+  if (
+    state.isHost &&
+    seat.seat !== state.hostSeat &&
+    (seat.isBot || seat.name || seat.reserved || seat.connected)
+  ) {
+    const kick = document.createElement("button");
+    kick.type = "button";
+    kick.className = "btn tiny seat-kick-inline";
+    kick.textContent = seat.isBot || seat.name === "空位" ? "踢掉" : "请出";
+    kick.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      AudioFX.prime?.();
+      socket.emit("kick", { seat: seat.seat }, (res) => {
+        if (res && res.ok === false && res.error) showToast(res.error);
+      });
+    });
+    label.appendChild(kick);
+  }
   el.appendChild(label);
 
   if (seat.melds?.length) {

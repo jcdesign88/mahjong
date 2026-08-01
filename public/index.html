@@ -53,24 +53,27 @@
         <button type="button" id="btn-mute" class="linkish mute-btn" title="Toggle sound">Sound on</button>
         <button type="button" id="btn-pause" class="linkish mute-btn" title="托管：让机器人代打" hidden>托管</button>
         <button type="button" id="btn-resume" class="btn accent resume-btn" title="取消托管，自己继续打" hidden>取消托管</button>
+        <button type="button" id="btn-stop-game" class="linkish mute-btn host-only-btn" title="结束对局，回到大厅" hidden>结束对局</button>
       </header>
+      <div id="host-pending-live" class="host-pending-live" hidden></div>
       <div id="afk-banner" class="afk-banner" hidden>
         机器人代打中 — 点 <strong>取消托管</strong> 继续自己打
       </div>
 
       <div id="waiting" class="waiting" hidden>
         <h2>Waiting for the table</h2>
-        <p class="waiting-sub">房主批准后入座 · 掉线可同一链接重连 · 平胡 OK</p>
+        <p class="waiting-sub">房主批准后入座 · 对局中也可申请接手机器人座位 · 掉线可同一链接重连</p>
         <div id="pending-panel" class="pending-panel" hidden></div>
         <div id="awaiting-host" class="awaiting-host" hidden>
           <p>已发送加入申请，等待房主批准…</p>
-          <p class="waiting-sub">请不要关闭页面。房主点「允许」后你会自动入座。</p>
+          <p class="waiting-sub">请不要关闭页面。房主点「允许」后你会自动入座（对局中会接手空位/机器人的牌）。</p>
         </div>
         <div id="seat-list" class="seat-list"></div>
         <div class="waiting-actions">
           <button type="button" id="btn-ready" class="btn primary">Ready</button>
           <button type="button" id="btn-bots" class="btn" hidden>补机器人</button>
           <button type="button" id="btn-start" class="btn accent" hidden>Start match</button>
+          <button type="button" id="btn-stop-lobby" class="btn" hidden>结束对局 / 重置</button>
         </div>
       </div>
 
