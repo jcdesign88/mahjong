@@ -21,6 +21,10 @@ function makeCode() {
   return code;
 }
 
+function normalizeRoomCode(raw) {
+  return String(raw || "").replace(/\D/g, "").slice(0, 5);
+}
+
 function broadcast(roomCode) {
   const game = rooms.get(roomCode);
   if (!game) return;
@@ -82,8 +86,20 @@ function setRoom(socket, code) {
 io.on("connection", (socket) => {
   setRoom(socket, null);
 
-  socket.on("create", ({ name }, cb) => {
-    const code = makeCode();
+  socket.on("create", ({ name, roomCode }, cb) => {
+    const requested = normalizeRoomCode(roomCode);
+    let code;
+    if (requested) {
+      if (!/^\d{5}$/.test(requested)) {
+        return cb?.({ ok: false, error: "请输入 5 位数字房号 — Enter a 5-digit room code" });
+      }
+      if (rooms.has(requested)) {
+        return cb?.({ ok: false, error: "房间号已被占用 — Room code taken" });
+      }
+      code = requested;
+    } else {
+      code = makeCode();
+    }
     const game = createGame(code);
     const result = game.joinAsHost(socket.id, name || "Host");
     if (!result.ok) return cb?.(result);
@@ -91,7 +107,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("join", ({ roomCode: code, name, rejoinToken }, cb) => {
-    const game = rooms.get(String(code || "").toUpperCase());
+    const normalized = normalizeRoomCode(code);
+    const game = rooms.get(normalized);
     if (!game) return cb?.({ ok: false, error: "找不到房间 — 请确认房号，或让房主重新创建" });
 
     const result = game.requestJoin(socket.id, name || "Player", rejoinToken);

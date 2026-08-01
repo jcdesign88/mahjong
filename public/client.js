@@ -290,6 +290,14 @@ function playerName() {
   return $("name-input").value.trim() || "Player";
 }
 
+function normalizeRoomCode(raw) {
+  return String(raw || "").replace(/\D/g, "").slice(0, 5);
+}
+
+function codeFromInput() {
+  return normalizeRoomCode($("code-input").value);
+}
+
 function createRoom() {
   showError("");
   if (!socket.connected) {
@@ -297,7 +305,11 @@ function createRoom() {
     return;
   }
   const name = playerName();
-  socket.emit("create", { name }, (res) => {
+  const roomCode = codeFromInput();
+  if (roomCode && !/^\d{5}$/.test(roomCode)) {
+    return showError("请输入 5 位数字房号 — Enter a 5-digit room code");
+  }
+  socket.emit("create", { name, roomCode: roomCode || undefined }, (res) => {
     if (!res?.ok) return showError(res?.error || "Could not create room");
     awaitingHost = false;
     if (res.rejoinToken) saveSession(res.roomCode, res.rejoinToken, name);
@@ -307,7 +319,7 @@ function createRoom() {
 
 function joinRoom(opts = {}) {
   showError("");
-  const roomCode = (opts.roomCode || $("code-input").value.trim()).toUpperCase();
+  const roomCode = normalizeRoomCode(opts.roomCode ?? $("code-input").value);
   if (!roomCode) return showError("Enter a room code");
   if (!socket.connected) {
     showError("Connecting… try again in a moment");
@@ -340,7 +352,7 @@ function tryAutoRejoin() {
   if (skipAutoRejoin) return false;
   const sess = loadSession();
   const params = new URLSearchParams(window.location.search);
-  const room = (params.get("room") || sess?.code || "").toUpperCase();
+  const room = normalizeRoomCode(params.get("room") || sess?.code || "");
   if (!room || !sess?.token || sess.code !== room) return false;
   if ($("name-input") && sess.name) $("name-input").value = sess.name;
   joinRoom({ roomCode: room, name: sess.name, rejoinToken: sess.token });
@@ -1303,15 +1315,15 @@ function escapeHtml(s) {
 // Auto-join / rejoin from ?room=CODE + saved seat token
 (function boot() {
   const params = new URLSearchParams(window.location.search);
-  const room = params.get("room");
-  if (room) $("code-input").value = room.toUpperCase();
+  const room = normalizeRoomCode(params.get("room") || "");
+  if (room) $("code-input").value = room;
   const sess = loadSession();
   if (sess?.name && $("name-input") && !$("name-input").value) {
     $("name-input").value = sess.name;
   }
   const tryOnce = () => {
     if (!socket.connected) return;
-    if (sess?.token && sess.code && room && sess.code === room.toUpperCase()) {
+    if (sess?.token && sess.code && room && normalizeRoomCode(sess.code) === room) {
       tryAutoRejoin();
     }
   };
