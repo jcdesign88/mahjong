@@ -60,11 +60,16 @@
 
       <div id="waiting" class="waiting" hidden>
         <h2>Waiting for the table</h2>
-        <p class="waiting-sub">Each player scores alone · 4 melds + pair wins · 平胡 OK</p>
+        <p class="waiting-sub">房主批准后入座 · 掉线可同一链接重连 · 平胡 OK</p>
+        <div id="pending-panel" class="pending-panel" hidden></div>
+        <div id="awaiting-host" class="awaiting-host" hidden>
+          <p>已发送加入申请，等待房主批准…</p>
+          <p class="waiting-sub">请不要关闭页面。房主点「允许」后你会自动入座。</p>
+        </div>
         <div id="seat-list" class="seat-list"></div>
         <div class="waiting-actions">
           <button type="button" id="btn-ready" class="btn primary">Ready</button>
-          <button type="button" id="btn-bots" class="btn">Fill empty seats with bots</button>
+          <button type="button" id="btn-bots" class="btn" hidden>补机器人</button>
           <button type="button" id="btn-start" class="btn accent" hidden>Start match</button>
         </div>
       </div>
@@ -86,20 +91,15 @@
             <div id="opp-right" class="seat-panel side right"></div>
           </div>
           <div id="me" class="seat-panel me"></div>
-          <div id="quick-chat" class="quick-chat" hidden>
-            <span class="quick-chat-label">快捷</span>
-            <div id="quick-chat-bar" class="quick-chat-bar"></div>
-          </div>
         </div>
         <aside id="log" class="log" aria-label="Game log"></aside>
       </div>
       <div id="chat-bubble" class="chat-bubble" hidden></div>
 
       <div id="chat-dock" class="chat-dock" hidden>
-        <div id="chat-messages" class="chat-messages"></div>
         <div id="chat-quick" class="chat-quick"></div>
         <form id="chat-form" class="chat-compose">
-          <button type="button" id="btn-ptt" class="btn-ptt" title="按住对讲（真人语音）">按住说话</button>
+          <button type="button" id="btn-ptt" class="btn-ptt" title="按住说话 — 真人麦克风（不是朗读）">按住说话</button>
           <input id="chat-input" type="text" maxlength="80" placeholder="说点什么…" autocomplete="off" />
           <label class="chat-tts-label" title="发送后语音朗读">
             <input type="checkbox" id="chat-tts" checked /> 朗读

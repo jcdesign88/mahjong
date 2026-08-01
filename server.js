@@ -10,6 +10,8 @@ const io = new Server(server, { cors: { origin: false } });
 
 const PORT = process.env.PORT || 3847;
 const rooms = new Map();
+/** Delay before deleting an empty lobby (allows accidental disconnect rejoin). */
+const EMPTY_LOBBY_MS = 3 * 60 * 1000;
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -30,38 +32,146 @@ function broadcast(roomCode) {
   }
 }
 
+function clearEmptyTimer(game) {
+  if (game._emptyTimer) {
+    clearTimeout(game._emptyTimer);
+    game._emptyTimer = null;
+  }
+}
+
+function scheduleEmptyCleanup(roomCode, game) {
+  clearEmptyTimer(game);
+  game._emptyTimer = setTimeout(() => {
+    const g = rooms.get(roomCode);
+    if (!g || g !== game) return;
+    if (g.humanCount() === 0 && g.phase === "lobby") {
+      g.clearClaimTimer();
+      rooms.delete(roomCode);
+    }
+  }, EMPTY_LOBBY_MS);
+}
+
 function createGame(code) {
   const game = new Game(code, () => broadcast(code));
   rooms.set(code, game);
   return game;
 }
 
+function seatPlayer(socket, game, result, cb) {
+  const roomCode = game.roomCode;
+  socket.join(roomCode);
+  clearEmptyTimer(game);
+  cb?.({
+    ok: true,
+    roomCode,
+    seat: result.seat,
+    rejoinToken: result.rejoinToken,
+    host: !!result.host,
+    rejoined: !!result.rejoined,
+  });
+  broadcast(roomCode);
+  return roomCode;
+}
+
+function roomOf(socket) {
+  return socket.data.roomCode || null;
+}
+
+function setRoom(socket, code) {
+  socket.data.roomCode = code || null;
+}
+
 io.on("connection", (socket) => {
-  let roomCode = null;
+  setRoom(socket, null);
 
   socket.on("create", ({ name }, cb) => {
     const code = makeCode();
     const game = createGame(code);
-    const result = game.join(socket.id, name || "Host");
+    const result = game.joinAsHost(socket.id, name || "Host");
     if (!result.ok) return cb?.(result);
-    roomCode = code;
-    socket.join(code);
-    cb?.({ ok: true, roomCode: code, seat: result.seat });
-    broadcast(code);
+    setRoom(socket, seatPlayer(socket, game, result, cb));
   });
 
-  socket.on("join", ({ roomCode: code, name }, cb) => {
+  socket.on("join", ({ roomCode: code, name, rejoinToken }, cb) => {
     const game = rooms.get(String(code || "").toUpperCase());
-    if (!game) return cb?.({ ok: false, error: "Room not found" });
-    const result = game.join(socket.id, name || "Player");
+    if (!game) return cb?.({ ok: false, error: "找不到房间 — 请确认房号，或让房主重新创建" });
+
+    const result = game.requestJoin(socket.id, name || "Player", rejoinToken);
     if (!result.ok) return cb?.(result);
-    roomCode = game.roomCode;
-    socket.join(roomCode);
-    cb?.({ ok: true, roomCode, seat: result.seat });
-    broadcast(roomCode);
+
+    if (result.pending) {
+      setRoom(socket, game.roomCode);
+      socket.join(game.roomCode);
+      clearEmptyTimer(game);
+      cb?.({ ok: true, pending: true, roomCode: game.roomCode });
+      broadcast(game.roomCode);
+      return;
+    }
+
+    setRoom(socket, seatPlayer(socket, game, result, cb));
+    if (result.rejoined && game.phase !== "lobby") {
+      game.maybeBotAct();
+    }
+  });
+
+  socket.on("approveJoin", ({ socketId: targetId }, cb) => {
+    const roomCode = roomOf(socket);
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.approveJoin(socket.id, targetId);
+    cb?.(result);
+    if (result.ok) {
+      const target = io.sockets.sockets.get(result.socketId);
+      if (target) {
+        setRoom(target, game.roomCode);
+        target.emit("joinApproved", {
+          roomCode: game.roomCode,
+          seat: result.seat,
+          rejoinToken: result.rejoinToken,
+        });
+      }
+      broadcast(roomCode);
+    }
+  });
+
+  socket.on("denyJoin", ({ socketId: targetId }, cb) => {
+    const roomCode = roomOf(socket);
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.denyJoin(socket.id, targetId);
+    cb?.(result);
+    if (result.ok) {
+      const target = io.sockets.sockets.get(result.socketId);
+      if (target) {
+        target.emit("joinDenied", { reason: "房主拒绝了你的加入申请" });
+        target.leave(game.roomCode);
+        setRoom(target, null);
+      }
+      broadcast(roomCode);
+    }
+  });
+
+  socket.on("kick", ({ seat }, cb) => {
+    const roomCode = roomOf(socket);
+    const game = rooms.get(roomCode);
+    if (!game) return cb?.({ ok: false });
+    const result = game.kick(socket.id, seat);
+    cb?.(result);
+    if (result.ok) {
+      if (result.kickedId) {
+        const target = io.sockets.sockets.get(result.kickedId);
+        if (target) {
+          target.emit("kicked", { reason: "房主请你离开了房间" });
+          target.leave(game.roomCode);
+          setRoom(target, null);
+        }
+      }
+      broadcast(roomCode);
+    }
   });
 
   socket.on("ready", ({ ready }, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     game.setReady(socket.id, ready);
@@ -70,22 +180,25 @@ io.on("connection", (socket) => {
   });
 
   socket.on("fillBots", (_data, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
-    game.fillBots();
-    cb?.({ ok: true });
+    const ok = game.fillBots(socket.id);
+    cb?.({ ok });
     broadcast(roomCode);
   });
 
   socket.on("start", (_data, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
-    const result = game.start();
+    const result = game.start(socket.id);
     cb?.(result);
     broadcast(roomCode);
   });
 
   socket.on("discard", ({ tile }, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.discard(socket.id, tile);
@@ -94,6 +207,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("claim", ({ action, tiles }, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.claim(socket.id, action, tiles);
@@ -102,6 +216,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("selfWin", (_data, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.selfWin(socket.id);
@@ -110,6 +225,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("kong", ({ tile }, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.declareKong(socket.id, tile);
@@ -118,6 +234,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("nextRound", (_data, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.nextRound();
@@ -126,6 +243,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("rematch", (_data, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.rematch();
@@ -134,6 +252,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("pause", (_data, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.pause(socket.id);
@@ -143,6 +262,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("resume", (_data, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.resume(socket.id);
@@ -151,6 +271,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("quickChat", ({ id }, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.quickChat(socket.id, id);
@@ -162,6 +283,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("chat", ({ text, voice }, cb) => {
+    const roomCode = roomOf(socket);
     const game = rooms.get(roomCode);
     if (!game) return cb?.({ ok: false });
     const result = game.chat(socket.id, text, { voice });
@@ -172,20 +294,25 @@ io.on("connection", (socket) => {
     }
   });
 
-  // WebRTC voice signaling (peer-to-peer audio between humans)
+  // WebRTC voice signaling (peer-to-peer — real mic audio, not TTS)
   socket.on("voice-signal", ({ to, data }) => {
+    const roomCode = roomOf(socket);
     if (!roomCode || !to || !data) return;
-    io.to(to).emit("voice-signal", { from: socket.id, data });
+    const target = io.sockets.sockets.get(to);
+    if (target) {
+      target.emit("voice-signal", { from: socket.id, data });
+    }
   });
 
   socket.on("disconnect", () => {
+    const roomCode = roomOf(socket);
     if (!roomCode) return;
     const game = rooms.get(roomCode);
     if (!game) return;
     game.leave(socket.id);
     if (game.humanCount() === 0 && game.phase === "lobby") {
-      game.clearClaimTimer();
-      rooms.delete(roomCode);
+      scheduleEmptyCleanup(roomCode, game);
+      broadcast(roomCode);
     } else {
       broadcast(roomCode);
       game.maybeBotAct();

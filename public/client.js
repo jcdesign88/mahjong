@@ -217,6 +217,37 @@ const overlay = $("overlay");
 let state = null;
 let selectedTile = null;
 let myReady = false;
+let awaitingHost = false;
+let sessionSaved = null;
+
+const SESSION_KEY = "mahjong-session";
+
+function loadSession() {
+  try {
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(code, token, name) {
+  if (!code || !token) return;
+  sessionSaved = { code, token, name: name || playerName() };
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionSaved));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSession() {
+  sessionSaved = null;
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 function tileClass(id) {
   if (id === "red") return "red";
@@ -265,24 +296,52 @@ function createRoom() {
     showError("Connecting… try again in a moment");
     return;
   }
-  socket.emit("create", { name: playerName() }, (res) => {
+  const name = playerName();
+  socket.emit("create", { name }, (res) => {
     if (!res?.ok) return showError(res?.error || "Could not create room");
+    awaitingHost = false;
+    if (res.rejoinToken) saveSession(res.roomCode, res.rejoinToken, name);
     enterRoom(res.roomCode);
   });
 }
 
-function joinRoom() {
+function joinRoom(opts = {}) {
   showError("");
-  const roomCode = $("code-input").value.trim().toUpperCase();
+  const roomCode = (opts.roomCode || $("code-input").value.trim()).toUpperCase();
   if (!roomCode) return showError("Enter a room code");
   if (!socket.connected) {
     showError("Connecting… try again in a moment");
     return;
   }
-  socket.emit("join", { roomCode, name: playerName() }, (res) => {
-    if (!res?.ok) return showError(res?.error || "Could not join");
-    enterRoom(res.roomCode);
-  });
+  const name = opts.name || playerName();
+  const rejoinToken = opts.rejoinToken || loadSession()?.token;
+  const sameRoom = loadSession()?.code === roomCode;
+  socket.emit(
+    "join",
+    { roomCode, name, rejoinToken: sameRoom || opts.rejoinToken ? rejoinToken : undefined },
+    (res) => {
+      if (!res?.ok) return showError(res?.error || "Could not join");
+      if (res.pending) {
+        awaitingHost = true;
+        enterRoom(res.roomCode);
+        renderAwaitingHost();
+        return;
+      }
+      awaitingHost = false;
+      if (res.rejoinToken) saveSession(res.roomCode, res.rejoinToken, name);
+      enterRoom(res.roomCode);
+    }
+  );
+}
+
+function tryAutoRejoin() {
+  const sess = loadSession();
+  const params = new URLSearchParams(window.location.search);
+  const room = (params.get("room") || sess?.code || "").toUpperCase();
+  if (!room || !sess?.token || sess.code !== room) return false;
+  if ($("name-input") && sess.name) $("name-input").value = sess.name;
+  joinRoom({ roomCode: room, name: sess.name, rejoinToken: sess.token });
+  return true;
 }
 
 $("btn-create").addEventListener("click", createRoom);
@@ -332,7 +391,6 @@ socket.on("state", (s) => {
 socket.on("quickChat", (chat) => {
   if (!chat) return;
   showChatBubble(chat);
-  appendChatMessage(chat);
   const ttsOn = $("chat-tts")?.checked !== false;
   if (chat.voice && ttsOn && typeof AudioFX !== "undefined") {
     AudioFX.prime();
@@ -342,6 +400,37 @@ socket.on("quickChat", (chat) => {
 
 socket.on("connect", () => {
   if (typeof VoiceChat !== "undefined") VoiceChat.setSocketId(socket.id);
+  // Accidental refresh / socket drop — reclaim seat if we have a token and aren't seated
+  if ((!state || state.mySeat < 0) && loadSession()?.token) {
+    tryAutoRejoin();
+  }
+});
+
+socket.on("joinApproved", (payload) => {
+  awaitingHost = false;
+  if (payload?.rejoinToken && payload?.roomCode) {
+    saveSession(payload.roomCode, payload.rejoinToken, playerName());
+  }
+  const ah = $("awaiting-host");
+  if (ah) ah.hidden = true;
+  $("btn-ready").hidden = false;
+});
+
+socket.on("joinDenied", (payload) => {
+  awaitingHost = false;
+  clearSession();
+  lobby.hidden = false;
+  tableScreen.hidden = true;
+  showError(payload?.reason || "加入被拒绝");
+});
+
+socket.on("kicked", (payload) => {
+  awaitingHost = false;
+  clearSession();
+  state = null;
+  lobby.hidden = false;
+  tableScreen.hidden = true;
+  showError(payload?.reason || "你已被房主请出房间");
 });
 
 socket.on("voice-signal", (payload) => {
@@ -414,28 +503,59 @@ $("chat-form")?.addEventListener("submit", (e) => {
   });
 });
 
-// Push-to-talk (real mic)
+// Push-to-talk — REAL microphone (WebRTC), not TTS / 朗读
 function bindPtt() {
   const btn = $("btn-ptt");
   if (!btn || typeof VoiceChat === "undefined") return;
+
   const start = async (ev) => {
     ev.preventDefault();
     try {
-      if (typeof AudioFX !== "undefined") AudioFX.prime();
-      await VoiceChat.ensureMic();
-      VoiceChat.setTalking(true);
+      btn.setPointerCapture?.(ev.pointerId);
     } catch (_) {
-      showToast("无法打开麦克风（需 HTTPS 并允许权限）");
+      /* ignore */
+    }
+    try {
+      if (typeof AudioFX !== "undefined") AudioFX.prime();
+      VoiceChat.setSocketId(socket.id);
+      await VoiceChat.ensureMic();
+      // Re-sync peers after mic is ready so tracks are attached
+      if (state?.voicePeers?.length) {
+        await VoiceChat.syncPeers(state.voicePeers.map((p) => p.id));
+      }
+      VoiceChat.setTalking(true);
+      if (VoiceChat.peerCount() === 0) {
+        showToast("已开麦（真人声音）。房间里需要另一位真人才能听到你");
+      }
+    } catch (err) {
+      console.warn(err);
+      showToast("无法打开麦克风 — 请用 HTTPS 链接并允许麦克风权限");
+      VoiceChat.setTalking(false);
     }
   };
   const end = (ev) => {
     ev.preventDefault();
     VoiceChat.setTalking(false);
   };
+
   btn.addEventListener("pointerdown", start);
   btn.addEventListener("pointerup", end);
-  btn.addEventListener("pointerleave", end);
   btn.addEventListener("pointercancel", end);
+  // iOS Safari sometimes drops pointerup — also bind touch
+  btn.addEventListener(
+    "touchstart",
+    (ev) => {
+      start(ev);
+    },
+    { passive: false }
+  );
+  btn.addEventListener(
+    "touchend",
+    (ev) => {
+      end(ev);
+    },
+    { passive: false }
+  );
 }
 bindPtt();
 
@@ -479,7 +599,6 @@ function render() {
     const banner = $("afk-banner");
     if (banner) banner.hidden = true;
     renderWaiting();
-    renderChatMessages();
     renderChatQuick();
     syncVoicePeers();
     return;
@@ -488,8 +607,6 @@ function render() {
   waiting.hidden = true;
   table.hidden = false;
   renderTable();
-  renderQuickChat();
-  renderChatMessages();
   renderChatQuick();
   syncVoicePeers();
 
@@ -510,36 +627,6 @@ const DEFAULT_QUICK = [
   { id: "thanks", text: "谢谢啊" },
 ];
 
-function renderQuickChat() {
-  const wrap = $("quick-chat");
-  const bar = $("quick-chat-bar");
-  if (!wrap || !bar) return;
-  const show =
-    state &&
-    state.mySeat >= 0 &&
-    (state.phase === "playing" || state.phase === "claim" || state.phase === "round_end");
-  wrap.hidden = !show;
-  if (!show) return;
-
-  const phrases = state.quickPhrases?.length ? state.quickPhrases : DEFAULT_QUICK;
-  if (bar.dataset.built === phrases.map((p) => p.id).join(",")) return;
-  bar.dataset.built = phrases.map((p) => p.id).join(",");
-  bar.innerHTML = "";
-  for (const p of phrases) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "quick-chat-btn";
-    b.textContent = p.text;
-    b.addEventListener("click", () => {
-      if (typeof AudioFX !== "undefined") AudioFX.prime();
-      socket.emit("quickChat", { id: p.id }, (res) => {
-        if (res && res.ok === false && res.error) showToast(res.error);
-      });
-    });
-    bar.appendChild(b);
-  }
-}
-
 function showChatBubble(chat) {
   const el = $("chat-bubble");
   if (!el) return;
@@ -552,31 +639,6 @@ function showChatBubble(chat) {
   showChatBubble._t = setTimeout(() => {
     el.hidden = true;
   }, 2800);
-}
-
-function appendChatMessage(chat) {
-  if (!state) return;
-  if (!state.chatMessages) state.chatMessages = [];
-  const last = state.chatMessages[state.chatMessages.length - 1];
-  if (last && last.t === chat.t && last.seat === chat.seat && last.text === chat.text) return;
-  state.chatMessages.push(chat);
-  if (state.chatMessages.length > 50) state.chatMessages.shift();
-  renderChatMessages();
-}
-
-function renderChatMessages() {
-  const el = $("chat-messages");
-  if (!el || !state) return;
-  const msgs = state.chatMessages || [];
-  el.innerHTML = msgs
-    .map((m) => {
-      const mine = m.seat === state.mySeat;
-      return `<div class="chat-line ${mine ? "mine" : ""}"><span class="chat-name">${escapeHtml(
-        m.name
-      )}</span><span class="chat-text">${escapeHtml(m.text)}</span></div>`;
-    })
-    .join("");
-  el.scrollTop = el.scrollHeight;
 }
 
 function renderChatQuick() {
@@ -614,35 +676,119 @@ function renderScoreboard() {
     .join("");
 }
 
+function renderAwaitingHost() {
+  const ah = $("awaiting-host");
+  if (ah) ah.hidden = !awaitingHost;
+  $("btn-ready").hidden = awaitingHost || state?.mySeat < 0;
+  $("btn-bots").hidden = true;
+  $("btn-start").hidden = true;
+  const list = $("seat-list");
+  if (list && awaitingHost) list.innerHTML = "";
+  const pp = $("pending-panel");
+  if (pp) pp.hidden = true;
+}
+
 function renderWaiting() {
+  if (awaitingHost || (state.mySeat < 0 && state.phase === "lobby")) {
+    awaitingHost = true;
+    renderAwaitingHost();
+    return;
+  }
+  awaitingHost = false;
+  const ah = $("awaiting-host");
+  if (ah) ah.hidden = true;
+
+  // Persist rejoin token whenever state includes it
+  if (state.rejoinToken && state.roomCode) {
+    saveSession(state.roomCode, state.rejoinToken, playerName());
+  }
+
+  const pendingPanel = $("pending-panel");
+  if (pendingPanel) {
+    pendingPanel.innerHTML = "";
+    const pending = state.pendingJoins || [];
+    if (state.isHost && pending.length) {
+      pendingPanel.hidden = false;
+      const title = document.createElement("div");
+      title.className = "waiting-sub";
+      title.textContent = "加入申请（房主审批）";
+      pendingPanel.appendChild(title);
+      for (const req of pending) {
+        const row = document.createElement("div");
+        row.className = "pending-card";
+        row.innerHTML = `<span class="pending-name">${escapeHtml(req.name)}</span>`;
+        const actions = document.createElement("div");
+        actions.className = "pending-actions";
+        const allow = document.createElement("button");
+        allow.type = "button";
+        allow.className = "btn accent tiny";
+        allow.textContent = "允许";
+        allow.addEventListener("click", () => {
+          AudioFX.prime?.();
+          socket.emit("approveJoin", { socketId: req.socketId });
+        });
+        const deny = document.createElement("button");
+        deny.type = "button";
+        deny.className = "btn tiny";
+        deny.textContent = "拒绝";
+        deny.addEventListener("click", () => {
+          socket.emit("denyJoin", { socketId: req.socketId });
+        });
+        actions.append(allow, deny);
+        row.appendChild(actions);
+        pendingPanel.appendChild(row);
+      }
+    } else {
+      pendingPanel.hidden = true;
+    }
+  }
+
   const list = $("seat-list");
   list.innerHTML = "";
   for (const seat of state.seats) {
     const card = document.createElement("div");
-    card.className = `seat-card ${seat.name ? "" : "empty"}`;
-    const status = !seat.name
-      ? "Empty"
-      : seat.isBot
-        ? "Bot"
-        : seat.ready
-          ? "Ready"
-          : "Not ready";
+    const empty = !seat.name && !seat.reserved;
+    card.className = `seat-card ${empty ? "empty" : ""} ${seat.isHost ? "host-seat" : ""}`;
+    let status = "空位";
+    if (seat.isBot) status = "机器人";
+    else if (seat.reserved) status = "离线·可重连";
+    else if (!seat.connected && seat.name) status = "离线";
+    else if (seat.ready) status = "已准备";
+    else if (seat.name) status = "未准备";
+
+    const hostTag = seat.isHost ? `<div class="host-tag">房主</div>` : "";
     card.innerHTML = `
       <div class="seat-name">${seat.seatName}</div>
-      <div class="player-name">${seat.name || "Waiting…"}</div>
+      ${hostTag}
+      <div class="player-name">${escapeHtml(seat.name || "Waiting…")}</div>
       <div class="meta">${status} · ${seat.score} pts</div>
     `;
+
+    if (state.isHost && seat.seat !== state.hostSeat && (seat.name || seat.isBot || seat.reserved)) {
+      const kick = document.createElement("button");
+      kick.type = "button";
+      kick.className = "btn tiny seat-kick";
+      kick.textContent = seat.isBot ? "踢掉机器人" : "请出";
+      kick.addEventListener("click", () => {
+        AudioFX.prime?.();
+        socket.emit("kick", { seat: seat.seat });
+      });
+      card.appendChild(kick);
+    }
     list.appendChild(card);
   }
 
-  const me = state.seats[state.mySeat];
+  const me = state.mySeat >= 0 ? state.seats[state.mySeat] : null;
   myReady = !!me?.ready;
+  $("btn-ready").hidden = !me;
   $("btn-ready").textContent = myReady ? "Unready" : "Ready";
   $("btn-ready").classList.toggle("primary", !myReady);
 
-  const allReady = state.seats.every((s) => s.name && (s.isBot || s.ready));
-  const full = state.seats.every((s) => s.name);
-  $("btn-start").hidden = !(full && allReady && state.mySeat === 0);
+  $("btn-bots").hidden = !state.isHost;
+
+  const allReady = state.seats.every((s) => (s.name || s.isBot) && (s.isBot || s.ready));
+  const full = state.seats.every((s) => s.name || s.isBot);
+  $("btn-start").hidden = !(full && allReady && state.isHost);
 }
 
 function relativeSeats() {
@@ -964,9 +1110,21 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;");
 }
 
-// Auto-join from ?room=CODE
+// Auto-join / rejoin from ?room=CODE + saved seat token
 (function boot() {
   const params = new URLSearchParams(window.location.search);
   const room = params.get("room");
   if (room) $("code-input").value = room.toUpperCase();
+  const sess = loadSession();
+  if (sess?.name && $("name-input") && !$("name-input").value) {
+    $("name-input").value = sess.name;
+  }
+  const tryOnce = () => {
+    if (!socket.connected) return;
+    if (sess?.token && sess.code && room && sess.code === room.toUpperCase()) {
+      tryAutoRejoin();
+    }
+  };
+  if (socket.connected) tryOnce();
+  else socket.once("connect", tryOnce);
 })();
