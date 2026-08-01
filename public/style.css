@@ -286,6 +286,22 @@ input:focus {
   border-color: rgba(212, 162, 76, 0.35);
 }
 
+.score-pill.turn {
+  color: var(--cream);
+  background: rgba(212, 162, 76, 0.22);
+  border-color: rgba(212, 162, 76, 0.75);
+  box-shadow: 0 0 10px rgba(212, 162, 76, 0.35);
+}
+
+.score-pill.turn strong {
+  color: var(--gold);
+}
+
+.score-pill.claim-from {
+  border-color: rgba(243, 235, 224, 0.35);
+  background: rgba(243, 235, 224, 0.08);
+}
+
 .mute-btn {
   margin-left: 4px;
   opacity: 0.85;
@@ -521,6 +537,40 @@ input:focus {
   align-items: center;
   justify-content: center;
   padding: 8px;
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+/* Active player's seat — gold ring + soft felt glow (mobile-obvious) */
+.seat-panel.active-turn {
+  z-index: 3;
+  background: rgba(212, 162, 76, 0.14);
+  box-shadow:
+    0 0 0 2.5px rgba(212, 162, 76, 0.85),
+    0 0 22px rgba(212, 162, 76, 0.4),
+    inset 0 0 18px rgba(212, 162, 76, 0.1);
+}
+
+.seat-panel.active-turn::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 14px;
+  border: 2px solid rgba(212, 162, 76, 0.55);
+  pointer-events: none;
+  animation: turnRing 1.5s ease-in-out infinite;
+}
+
+/* Claim window: soft mark on discarder (not "their turn to discard") */
+.seat-panel.claim-from {
+  background: rgba(243, 235, 224, 0.07);
+  box-shadow: 0 0 0 1.5px rgba(243, 235, 224, 0.32);
+}
+
+@keyframes turnRing {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
 }
 
 .seat-panel.me {
@@ -532,6 +582,10 @@ input:focus {
   z-index: 2;
   transform: none !important;
   animation: none !important;
+}
+
+.seat-panel.me.active-turn {
+  z-index: 3;
 }
 
 /* Opponents drift slightly so the table feels alive */
@@ -554,7 +608,8 @@ input:focus {
 @media (prefers-reduced-motion: reduce) {
   .felt,
   .seat-panel.far,
-  .seat-panel.side {
+  .seat-panel.side,
+  .seat-panel.active-turn::after {
     animation: none !important;
   }
 }
@@ -568,6 +623,26 @@ input:focus {
 
 .seat-label .who { font-weight: 700; color: var(--cream); text-transform: none; letter-spacing: 0; font-size: 0.85rem; }
 .seat-label.turn .who { color: var(--gold); }
+.seat-label.turn {
+  color: rgba(212, 162, 76, 0.9);
+  font-weight: 600;
+}
+
+#turn-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#turn-label.hot {
+  color: var(--gold);
+  font-weight: 800;
+  text-shadow: 0 0 12px rgba(212, 162, 76, 0.45);
+}
+
+#turn-label.claim {
+  color: var(--cream);
+  font-weight: 700;
+}
 
 .tiles {
   display: flex;

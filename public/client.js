@@ -815,13 +815,13 @@ function render() {
 }
 
 const DEFAULT_QUICK = [
-  { id: "hurry", text: "麻利点" },
-  { id: "deal", text: "快出牌啊" },
-  { id: "wait", text: "等会儿" },
-  { id: "brb", text: "马上回来" },
-  { id: "calm", text: "别催呗" },
-  { id: "sorry", text: "不好意思啊" },
-  { id: "thanks", text: "谢谢啊" },
+  { id: "hurry", text: "麻利点儿行不" },
+  { id: "deal", text: "别墨迹了出牌啊" },
+  { id: "wait", text: "稍等哈先别催" },
+  { id: "brb", text: "马上回来啊你先打" },
+  { id: "calm", text: "急啥急寻思呢" },
+  { id: "sorry", text: "不好意思啊刚走神了" },
+  { id: "thanks", text: "谢谢老板" },
 ];
 
 function showChatBubble(chat) {
@@ -864,12 +864,15 @@ function renderScoreboard() {
   const el = $("scoreboard");
   if (!el || !state?.seats) return;
   el.innerHTML = state.seats
-    .map(
-      (s) =>
-        `<span class="score-pill ${s.seat === state.mySeat ? "me" : ""}">${escapeHtml(
-          s.name || s.seatName
-        )} <strong>${s.score}</strong></span>`
-    )
+    .map((s) => {
+      const classes = ["score-pill"];
+      if (s.seat === state.mySeat) classes.push("me");
+      if (state.phase === "playing" && s.seat === state.turn) classes.push("turn");
+      else if (state.phase === "claim" && s.seat === state.lastDiscarder) classes.push("claim-from");
+      return `<span class="${classes.join(" ")}">${escapeHtml(
+        s.name || s.seatName
+      )} <strong>${s.score}</strong></span>`;
+    })
     .join("");
 }
 
@@ -986,6 +989,20 @@ function relativeSeats() {
 function renderSeatPanel(el, seatIndex, opts = {}) {
   const seat = state.seats[seatIndex];
   el.innerHTML = "";
+
+  // Strong "whose turn" signal during play; during claim, soft-mark the discarder
+  const baseClass = el.className
+    .split(/\s+/)
+    .filter((c) => c && c !== "active-turn" && c !== "claim-from")
+    .join(" ");
+  if (seat.isTurn) {
+    el.className = `${baseClass} active-turn`;
+  } else if (state.phase === "claim" && seat.seat === state.lastDiscarder) {
+    el.className = `${baseClass} claim-from`;
+  } else {
+    el.className = baseClass;
+  }
+
   const label = document.createElement("div");
   label.className = `seat-label ${seat.isTurn ? "turn" : ""}`;
   label.innerHTML = `<span class="who">${escapeHtml(seat.name || "—")}</span> · ${seat.seatName} · ${seat.score} pts`;
@@ -1093,14 +1110,20 @@ function renderTable() {
 
   $("round-label").textContent = `Round ${state.round}`;
   $("wall-count").textContent = `Wall · ${state.wallCount}`;
+  const turnLabel = $("turn-label");
   const turnSeat = state.seats[state.turn];
   if (state.phase === "claim") {
-    $("turn-label").textContent = "有人可以叫牌…";
+    turnLabel.textContent = "有人可以叫牌…";
+    turnLabel.classList.add("claim");
+    turnLabel.classList.remove("hot");
   } else if (turnSeat) {
     const thinking = turnSeat.isBot || turnSeat.paused ? "想一会儿" : "出牌中";
-    $("turn-label").textContent = `轮到 ${turnSeat.name} · ${thinking}`;
+    turnLabel.textContent = `轮到 ${turnSeat.name} · ${thinking}`;
+    turnLabel.classList.add("hot");
+    turnLabel.classList.remove("claim");
   } else {
-    $("turn-label").textContent = "—";
+    turnLabel.textContent = "—";
+    turnLabel.classList.remove("hot", "claim");
   }
 
   const ld = $("last-discard");
